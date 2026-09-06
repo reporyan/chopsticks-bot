@@ -25,7 +25,7 @@ end
 
 class Turn
     #initialise
-    attr_accessor :parent, :p1l, :p1r, :p2l, :p2r, :turn_count, :turn_player, :parents, :children, :score, :branch_end, :from_choice
+    attr_accessor :parent, :p1l, :p1r, :p2l, :p2r, :turn_count, :turn_player, :parents, :children, :score, :eval, :branch_end, :from_choice
     
     def initialize
         #fingers
@@ -81,7 +81,7 @@ class ChopSticks < Gosu::Window
         @choices = ["LL", "LR", "RL", "RR", "LR0", "LR1", "LR2", "LR3", "LR4", "RL0", "RL1", "RL2", "RL3", "RL4"]
 
         #labels
-        @depth_input = 1
+        @depth_input = 22
         @best_move = "N/A"
         @best_move_chain = "N/A"
         @gen_time = "N/A"
@@ -400,13 +400,16 @@ class ChopSticks < Gosu::Window
         return turn
     end
 
-    def PathMove(turn, depth)
+        def PathMove(turn, depth, alpha = -10000, beta = 10000)
         @turn_count += 1
 
         if(depth == 0)
             turn.branch_end = true
-            return nil;
+            turn.eval = turn.score
+            return turn.score
         end
+
+        best_eval = (turn.turn_player == 1) ? -10000 : 10000
 
         i = 0
         while i < 14
@@ -421,19 +424,45 @@ class ChopSticks < Gosu::Window
                 child_turn.turn_player = turn.turn_player
                 child_turn.parents = turn.parents.clone
                 child_turn.parents << turn
-
-                #from choice
                 child_turn.from_choice = i
+
                 if(MakeMove(child_turn, i))
                     turn.children << child_turn
-                    if(child_turn.branch_end == false) #only keep going if it isnt the end of the branch
-                        PathMove(child_turn, depth - 1)
+
+                    if(child_turn.branch_end)
+                        child_eval = child_turn.score
+                        child_turn.eval = child_eval
+                    else
+                        child_eval = PathMove(child_turn, depth - 1, alpha, beta)
+                    end
+
+                    if(turn.turn_player == 1)
+                        if(child_eval > best_eval)
+                            best_eval = child_eval
+                        end
+                        if(best_eval > alpha)
+                            alpha = best_eval
+                        end
+                    else
+                        if(child_eval < best_eval)
+                            best_eval = child_eval
+                        end
+                        if(best_eval < beta)
+                            beta = best_eval
+                        end
+                    end
+
+                    if(alpha >= beta)
+                        break #this now stops us GENERATING the remaining siblings, not just re-visiting them
                     end
                 end
             end
 
             i += 1
         end
+
+        turn.eval = best_eval
+        return best_eval
     end
 
     def SameTurn(turn1, turn2)
@@ -458,7 +487,7 @@ class ChopSticks < Gosu::Window
     end
 
     #bot
-    def Minimax(turn, depth)
+    def Minimax(turn, depth, alpha = -10000, beta = 10000)
         #return if end
         if(depth == 0 || turn.branch_end == true)
             return turn.score
@@ -470,10 +499,21 @@ class ChopSticks < Gosu::Window
 
             i = 0
             while i < turn.children.length
-                eval = Minimax(turn.children[i], depth - 1)
+                eval = Minimax(turn.children[i], depth - 1, alpha, beta)
                 if(eval > max_eval)
                     max_eval = eval
                 end
+
+                #alpha
+                if(max_eval >= alpha)
+                    alpha = max_eval
+                end
+
+                if(alpha >= beta)
+                    #break if useless
+                    break
+                end
+
                 i += 1
             end
             
@@ -483,10 +523,20 @@ class ChopSticks < Gosu::Window
 
             i = 0
             while i < turn.children.length
-                eval = Minimax(turn.children[i], depth - 1)
+                eval = Minimax(turn.children[i], depth - 1, alpha, beta)
                 if(eval < min_eval)
                     min_eval = eval
                 end
+
+                if(min_eval < beta)
+                    beta = min_eval
+                end
+
+                if(alpha >= beta)
+                    #break if useless
+                    break
+                end
+
                 i += 1
             end
 
@@ -494,61 +544,39 @@ class ChopSticks < Gosu::Window
         end
     end
 
-    def BestMove(turn, depth, root)
-        #return if end
+        def BestMove(turn, depth, root)
         if(turn == nil)
             puts("Nil Turn for Best Move")
             return nil
-        elsif(depth == 0 || turn.branch_end == true)
+        elsif(turn.children.length == 0)
             return nil
         end
 
-        #recursive
-        if(turn.turn_player == 1)
-            max_eval = -10000
-            max_child = -1
+        best_i = -1
+        best_val = (turn.turn_player == 1) ? -10000 : 10000
 
-            i = 0
-            while i < turn.children.length
-                eval = Minimax(turn.children[i], depth - 1)
-                if(eval > max_eval)
-                    max_eval = eval
-                    max_child = i
-                end
-                i += 1
+        i = 0
+        while i < turn.children.length
+            if(turn.turn_player == 1 && turn.children[i].eval > best_val)
+                best_val = turn.children[i].eval
+                best_i = i
+            elsif(turn.turn_player == 2 && turn.children[i].eval < best_val)
+                best_val = turn.children[i].eval
+                best_i = i
             end
-
-            puts(max_child.to_s())
-            puts("Best Move: " + @choices[turn.children[max_child].from_choice])         
-      
-            if(root)
-                @best_move = @choices[turn.children[max_child].from_choice]
-            end
-
-            return turn.children[max_child]
-        else
-            min_eval = 10000
-            min_child = -1
-
-            i = 0
-            while i < turn.children.length
-                eval = Minimax(turn.children[i], depth - 1)
-                if(eval < min_eval)
-                    min_eval = eval
-                    min_child = i
-                end
-                i += 1
-            end
-
-            puts(max_child.to_s())
-            puts("Best Move: " + @choices[turn.children[min_child].from_choice])
-
-            if(root)
-                @best_move = @choices[turn.children[min_child].from_choice]
-            end
-
-            return turn.children[min_child]
+            i += 1
         end
+
+        chosen = turn.children[best_i]
+
+        puts(best_i.to_s())
+        puts("Best Move: " + @choices[chosen.from_choice])
+
+        if(root)
+            @best_move = @choices[chosen.from_choice]
+        end
+
+        return chosen
     end
 
     #extra
@@ -657,7 +685,7 @@ class ChopSticks < Gosu::Window
         @small_font.draw("Gen Time: " + @gen_time.to_s(), 825, 235, ZOrder::FRONT, 1.0, 1.0, TEXT_COLOUR)
         
         if(@depth_input >= 10)
-            @small_font.draw("WARNING: Depth > 10 can calculate slowly (>1min)", 810, 625, ZOrder::FRONT, 1.0, 1.0, Gosu::Color::RED)
+            @small_font.draw("WARNING: slow machines can have delays", 810, 625, ZOrder::FRONT, 1.0, 1.0, Gosu::Color::RED)
         end
 
         @image = Gosu::Image.new("images/subtract.png")
